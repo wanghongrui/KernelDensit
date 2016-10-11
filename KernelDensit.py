@@ -111,6 +111,10 @@ arcpy.AddMessage("Finished grouping points...")
 要不要对commonpointdict进行压缩，去掉冗余的数据。
 对于这个问题，明天再做思考2016年10月10日15:55:25
 '''
+# 压缩
+groupidpointdict = dict()
+for k, v in commonpointdict.iteritems():
+    if groupidpointdict.has_key(str(v["X"]) + str(v["Y"])) == False:
+        groupidpointdict[str(v["X"]) + str(v["Y"])] = v["groupid"]
 
-
-
+arcpy.AddMessage(groupidpointdict)
