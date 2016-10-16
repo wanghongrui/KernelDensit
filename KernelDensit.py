@@ -4,7 +4,13 @@ import math
 import copy
 
 gRoadLayer = arcpy.GetParameterAsText(0)
-gSplitLength = arcpy.GetParameterAsText(1)
+gPopulationLayer = arcpy.GetParameterAsText(1)
+gPopulationField = arcpy.GetParameterAsText(2)
+gSupermarketLayer = arcpy.GetParameterAsText(3)
+gSplitLength = arcpy.GetParameterAsText(4)
+
+gDesc = arcpy.Describe(gRoadLayer)
+gPath = gDesc.path;
 
 # 1. 预处理
 arcpy.AddMessage("1. Pretreatment...")
@@ -87,6 +93,7 @@ groupid_index = 1000000
 for k, v in commonpointdict.iteritems():
     if v["commonid"] in tempdict[str(v["X"]) + str(v["Y"])] or tempdict.has_key(str(v["X"]) + str(v["Y"])):
         _groupid = ''.join(map(str, tempdict[str(v["X"]) + str(v["Y"])]))
+        
         if _groupid <> "":
             v["groupid"] = int(_groupid)
         else:
@@ -105,9 +112,14 @@ groupidpointdict = dict()
 for k, v in commonpointdict.iteritems():
     if groupidpointdict.has_key(str(v["X"]) + str(v["Y"])) == False:
         groupidpointdict[str(v["X"]) + str(v["Y"])] = v["groupid"]
+'''
+Tip. 存在潜在的问题：当很多条线段连接同一个点时，这个点的groupid就太大了。
+    因为设计的就是这么狗血groupid:1125781257912580125771258412586125911221312215478479
+    这里有待于优化，我先用本方法试着改过来2016年10月16日21:57:17
+'''
 
-# 2.5 逐条读取线
-arcpy.AddMessage("2.5 Read road lines...")
+# 2.5 逐条读取线,并剖分
+arcpy.AddMessage("2.5 Read road lines and split it...")
 linerows = arcpy.da.SearchCursor("dh_explode",("OID@", "SHAPE@", "SHAPE@LENGTH"))
 originlinedict = dict()
 segdict = dict()    #存放剖分后的线段
@@ -119,7 +131,7 @@ def insertPoint(p1, p2, olen, rlen):	# 根据比例插入点
     ratia = rlen / olen
     x = round(p1[0] + (p2[0] - p1[0]) * ratia, 2)
     y = round(p1[1] + (p2[1] - p1[1]) * ratia, 2)
-    return [x, y]
+    return (x, y)
 
 line_index = 0
 for row in linerows:
@@ -127,7 +139,7 @@ for row in linerows:
     for part in row[1]:
         points = []
         for pnt in part:
-            points.append([round(pnt.X, 2), round(pnt.Y, 2)])
+            points.append((round(pnt.X, 2), round(pnt.Y, 2)))
 
     if groupidpointdict.has_key(str(points[0][0])+str(points[0][1])):
         origin["groupid"] = groupidpointdict[str(points[0][0])+str(points[0][1])]
@@ -146,7 +158,7 @@ for row in linerows:
             if len(stack) >= 1:
                 templength = length(stack[-1], points[-1])
                 totallength = totallength + templength
-                if totallength >= rlen:
+                if totallength > rlen:
                     break_length = rlen - (totallength - templength)
                     line_end = points[-1]
                     line_start = stack[-1]
@@ -166,12 +178,12 @@ for row in linerows:
                 stack.append(points.pop())
 
         if len(stack) >= 2:
-            seg = copy.copy(origin)
-            arcpy.AddMessage(stack)
-            seg["points"] = copy.copy(stack)
-            seg["length"] = rlen
-            segdict[line_index] = seg
-            line_index = line_index + 1
+            if length(stack[-1], stack[-2]) > 0.01:
+                seg = copy.copy(origin)
+                seg["points"] = copy.copy(stack)
+                seg["length"] = rlen
+                segdict[line_index] = seg
+                line_index = line_index + 1
             del stack[:]
     
     else:  # 有些线本来就很短，不足以剖分
@@ -179,10 +191,51 @@ for row in linerows:
         seg["points"] = points
         segdict[line_index] = seg
         line_index = line_index + 1
+arcpy.AddMessage("Finished split lines: " + str(len(segdict)))
 
-arcpy.AddMessage("Finished read road lines...")
+# 2.6 生成新要素类
+arcpy.AddMessage("Generate split layer...")
+arcpy.Delete_management("dh_split")
+arcpy.Delete_management("dh_split.shp")
+dh_split = arcpy.CreateFeatureclass_management(gDesc.path, "dh_split", "POLYLINE", "", "DISABLED", "DISABLED", "dh_explode")
+fc_fields = (   
+ ("id", "LONG", None, None, None, "", "NON_NULLABLE", "REQUIRED"),  
+ ("length", "FLOAT", None, None, None, "", "NULLABLE", "NON_REQUIRED"),  
+ ("groupid", "TEXT", None, None, 256, "", "NULLABLE", "NON_REQUIRED")
+ ) 
 
-# 2.6 剖分线
+for fc_field in fc_fields:  
+    arcpy.AddField_management(dh_split, *fc_field)
+
+arcpy.AddMessage(dh_split)
+
+with arcpy.da.InsertCursor('dh_split', ["id", "length", "groupid", "SHAPE@"]) as inscur:
+    for k, v in segdict.iteritems():
+        seg_point = arcpy.Array()
+        for point in v["points"]:
+            seg_point.add(arcpy.Point(point[0], point[1]))
+        arcpy.AddMessage(v)
+        fc_groupid = str(v["groupid"])
+        '''
+         报错： v["groupid"]取不到值，也就是说这条线段没有获取到groupid。2016年10月16日22:50:45
+        '''
+        if fc_groupid > 49:
+            fc_groupid = fc_groupid[:49]
+        inscur.insertRow((k, v["length"], fc_groupid, arcpy.Polyline(seg_point)))
+del inscur
+
+arcpy.AddMessage("Generated split layers...")
+
+
+# 3. 人口、超市映射至最近的道路seg
+
+arcpy.AddMessage("Begin Project...")
+
+arcpy.Near_analysis(gPopulationLayer, dh_split, "200 Meters", "NO_LOCATION", "NO_ANGLE")
+arcpy.Near_analysis(gSupermarketLayer, dh_split, "200 Meters", "NO_LOCATION", "NO_ANGLE")
+
+arcpy.AddMessage(arcpy.GetMessages())
+
 
 
 
