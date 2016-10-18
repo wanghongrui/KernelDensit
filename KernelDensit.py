@@ -89,33 +89,44 @@ for k, v in tempdict.iteritems():
             else:
                 commondict[i] = k
 
-groupid_index = 1000000
+max_groupid = 0
+temp_groupid = 0
+tempkeyvaluedict = dict()
 for k, v in commonpointdict.iteritems():
+    if tempkeyvaluedict.has_key(str(v["X"]) + str(v["Y"])) <> True:
+        tempkeyvaluedict[str(v["X"]) + str(v["Y"])] = []
     if v["commonid"] in tempdict[str(v["X"]) + str(v["Y"])] or tempdict.has_key(str(v["X"]) + str(v["Y"])):
-        _groupid = ''.join(map(str, tempdict[str(v["X"]) + str(v["Y"])]))
-        
-        if _groupid <> "":
-            v["groupid"] = int(_groupid)
-        else:
-            v["groupid"] = groupid_index
-            groupid_index = groupid_index + 1
+        if tempdict[str(v["X"]) + str(v["Y"])]:
+            temp_groupid = tempdict[str(v["X"]) + str(v["Y"])][0]  # 以列表中第一个元素，作为groupid
+            if temp_groupid > max_groupid:
+                max_groupid = temp_groupid
+            v["groupid"] = temp_groupid
 
 arcpy.AddMessage("Finished grouping points...")
 
+
 '''
-要不要对commonpointdict进行压缩，去掉冗余的数据。
-对于这个问题，明天再做思考2016年10月10日15:55:25
+#要不要对commonpointdict进行压缩，去掉冗余的数据。
+#对于这个问题，明天再做思考2016年10月10日15:55:25
 '''
 # 2.4 压缩groupid
 arcpy.AddMessage("2.5 Compass groupid...")
+groupid_index = max_groupid + 1
 groupidpointdict = dict()
 for k, v in commonpointdict.iteritems():
     if groupidpointdict.has_key(str(v["X"]) + str(v["Y"])) == False:
-        groupidpointdict[str(v["X"]) + str(v["Y"])] = v["groupid"]
+        if v["groupid"]:
+            groupidpointdict[str(v["X"]) + str(v["Y"])] = v["groupid"]
+        else:
+            groupidpointdict[str(v["X"]) + str(v["Y"])] = groupid_index
+            groupid_index = groupid_index + 1
+        
+arcpy.AddMessage(groupidpointdict)
+
 '''
-Tip. 存在潜在的问题：当很多条线段连接同一个点时，这个点的groupid就太大了。
-    因为设计的就是这么狗血groupid:1125781257912580125771258412586125911221312215478479
-    这里有待于优化，我先用本方法试着改过来2016年10月16日21:57:17
+#Tip. 存在潜在的问题：当很多条线段连接同一个点时，这个点的groupid就太大了。
+#    因为设计的就是这么狗血groupid:1125781257912580125771258412586125911221312215478479
+#    这里有待于优化，我先用本方法试着改过来2016年10月16日21:57:17
 '''
 
 # 2.5 逐条读取线,并剖分
@@ -145,6 +156,12 @@ for row in linerows:
         origin["groupid"] = groupidpointdict[str(points[0][0])+str(points[0][1])]
     elif groupidpointdict.has_key(str(points[len(points) - 1][0]) + str(points[len(points) - 1][1])):
         origin["groupid"] = groupidpointdict[str(points[len(points) - 1][0]) + str(points[len(points) - 1][1])]
+    else:
+        origin["groupid"] = groupid_index
+        groupid_index = groupid_index + 1
+        #
+        #    #Tips: 3W多条数据，大概有90条线段没有找到groupid——2016年10月17日13:54:58
+        #
 
     origin["length"] = round(row[2], 2)
   
@@ -214,11 +231,11 @@ with arcpy.da.InsertCursor('dh_split', ["id", "length", "groupid", "SHAPE@"]) as
         seg_point = arcpy.Array()
         for point in v["points"]:
             seg_point.add(arcpy.Point(point[0], point[1]))
-        arcpy.AddMessage(v)
+        #arcpy.AddMessage(v)
         fc_groupid = str(v["groupid"])
-        '''
-         报错： v["groupid"]取不到值，也就是说这条线段没有获取到groupid。2016年10月16日22:50:45
-        '''
+        #
+         #报错： v["groupid"]取不到值，也就是说这条线段没有获取到groupid。2016年10月16日22:50:45
+        #
         if fc_groupid > 49:
             fc_groupid = fc_groupid[:49]
         inscur.insertRow((k, v["length"], fc_groupid, arcpy.Polyline(seg_point)))
