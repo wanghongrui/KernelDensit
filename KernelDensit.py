@@ -37,6 +37,7 @@ arcpy.AddMessage("2. Split...")
 
 
 # 2.5 逐条读取线,并剖分
+gMaxSplitLength = int(gSplitLength)
 arcpy.AddMessage("2.5 Read road lines and split it...")
 with arcpy.da.SearchCursor("dh_explode",("OID@", "SHAPE@", "SHAPE@LENGTH")) as linerows:
     originlinedict = dict()
@@ -110,6 +111,9 @@ with arcpy.da.SearchCursor("dh_explode",("OID@", "SHAPE@", "SHAPE@LENGTH")) as l
             seg["points"] = points
             segdict[line_index] = seg
             line_index = line_index + 1
+            if gMaxSplitLength < origin["length"]:
+                gMaxSplitLength = origin["length"]
+                arcpy.AddMessage(gMaxSplitLength)
     del linerows
 arcpy.AddMessage("Finished split lines: " + str(len(segdict)))
 
@@ -190,7 +194,9 @@ arcpy.Delete_management("dh_generators")
 arcpy.Select_analysis("dh_split", "dh_generators", "generator = 1")
 
 
-arcpy.SpatialJoin_analysis("dh_split", "dh_generators", "dh_spatialjoin", "JOIN_ONE_TO_MANY", "KEEP_COMMON", "", "WITHIN_A_DISTANCE", str(int(gH) * int(gSplitLength)) + " Meters")
+arcpy.SpatialJoin_analysis("dh_split", "dh_generators", "dh_spatialjoin", "JOIN_ONE_TO_MANY", "KEEP_COMMON", "", "WITHIN_A_DISTANCE", str(int(gH) * gMaxSplitLength) + " Meters")
+arcpy.AddMessage(gMaxSplitLength)
+arcpy.AddMessage(str(int(gH) * gMaxSplitLength))
 arcpy.DeleteIdentical_management("dh_spatialjoin", ["Shape"]) # 必须，否则隶属于两块“supermarket”的seg会出现两次，甚至三次。。。
 # 2.1 提取公共点
 # arcpy.AddMessage("2.1 Extract common points...")
@@ -342,6 +348,3 @@ with arcpy.da.InsertCursor(dh_output, ["hemidu", "SHAPE@"]) as inscur:
 del inscur
 
 arcpy.AddMessage("Finished!")
-
-
-
