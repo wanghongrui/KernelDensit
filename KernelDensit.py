@@ -338,13 +338,13 @@ output_fields = (
 for output_field in output_fields:  
     arcpy.AddField_management(dh_output, *output_field)
 
-with arcpy.da.InsertCursor(dh_output, ["hemidu", "SHAPE@"]) as inscur:
+with arcpy.da.InsertCursor(dh_output, ["hemidu", "SHAPE@", "population"]) as inscur:
     for k, v in linedict.iteritems():
         if v["hemidu"] <> 0:
             seg_point = arcpy.Array()
             for point in v["points"]:
                 seg_point.add(arcpy.Point(point[0], point[1]))
-            inscur.insertRow((v["hemidu"], arcpy.Polyline(seg_point)))
+            inscur.insertRow((v["hemidu"], arcpy.Polyline(seg_point), v["population"]))
 del inscur
 
 arcpy.AddMessage("Finished!")
